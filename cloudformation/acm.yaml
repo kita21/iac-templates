@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "stackName: acm. AWS::CertificateManager::Certificate"
+
+Parameters:
+  Domain:
+    Type: String
+    Description: Validation Domain
+    Default: example.com
+  HostedZoneId:
+    Type: String
+    Description: HostedZoneId
+    Default: Z012345689ABCDEFG
+
+Resources:
+  ACM:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref Domain
+      SubjectAlternativeNames:
+        - !Sub "*.${Domain}"
+      DomainValidationOptions: # us-east-1でも使用するためImportValueではくParametersで指定
+        - DomainName: !Ref Domain
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+
+Outputs:
+  ACMArn:
+    Description: Output Export AWS::CertificateManager::Certificate.Arn
+    Value: !Ref ACM
+    Export:
+      Name: acm-arn

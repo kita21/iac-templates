@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "stackName: {ENV}-sg. AWS::EC2::SecurityGroup"
+
+Parameters:
+  Env:
+    Type: String
+    Description: Project environment
+    AllowedValues: [dev, prd]
+  Project:
+    Type: String
+    Description: Project Name
+    Default: example
+
+Resources:
+  AppLBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Env}-${Project}-app-lb-sg
+      GroupDescription: !Sub ${Env}-${Project}-app-lb-sg
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourcePrefixListId: pl-58a04531 # https://aws.amazon.com/jp/blogs/news/limit-access-to-your-origins-using-the-aws-managed-prefix-list-for-amazon-cloudfront/
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${Project}-app-lb-sg
+
+  PrivateInstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Env}-${Project}-private-instance-sg
+      GroupDescription: !Sub ${Env}-${Project}-private-instance-sg
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SecurityGroupIngress: # ec2 /proc/sys/net/ipv4/ip_local_port_range
+        - IpProtocol: tcp
+          FromPort: 32768
+          ToPort: 60999
+          SourceSecurityGroupId: !Ref AppLBSG
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${Project}-private-instance-sg
+
+  PrivateLinkSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Env}-${Project}-private-link-sg
+      GroupDescription: !Sub ${Env}-${Project}-private-link-sg
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SecurityGroupIngress:
+        - Description: !Sub ${Env}-${Project}-public-1a-subnet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Fn::ImportValue: !Sub ${Env}-public-1a-subnet-cidrblock
+        - Description: !Sub ${Env}-${Project}-public-1c-subnet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Fn::ImportValue: !Sub ${Env}-public-1c-subnet-cidrblock
+        - Description: !Sub ${Env}-${Project}-private-1a-subnet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Fn::ImportValue: !Sub ${Env}-private-1a-subnet-cidrblock
+        - Description: !Sub ${Env}-${Project}-private-1c-subnet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Fn::ImportValue: !Sub ${Env}-private-1c-subnet-cidrblock
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${Project}-private-link-sg
+
+Outputs:
+  PrivateLinkSGGroupId:
+    Description: Output Export AWS::EC2::SecurityGroup.GroupId PrivateLinkSGGroupId
+    Value: !GetAtt PrivateLinkSG.GroupId
+    Export:
+      Name: !Sub ${Env}-private-link-sg-id

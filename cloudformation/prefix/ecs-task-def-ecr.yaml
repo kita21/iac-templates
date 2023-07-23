@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "stackname: {Prefix}-{Env}-ecs-task-def-ecr. ECS-TaskDefinition, CloudWatchLogs, ECR"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Environment Name Configuration"
+        Parameters:
+          - Prefix
+          - Env
+          - Project
+
+Mappings:
+  ImportValue:
+    ExecutionRole:
+      Arn: task-execution-role-arn
+  AWSParameterMap:
+    TaskDefinition:
+      Cpu: 0
+      Memory: 514
+    RetentionInDays:
+      dev: 7
+      prd: 180
+    ECR:
+      LifecyclePolicyText: |
+        {
+          "rules": [
+            {
+              "rulePriority": 1,
+              "description": "Delete more than 30 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 30
+              },
+              "action": {
+                "type": "expire"
+              }
+            }
+          ]
+        }
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: v1
+  Env:
+    Type: String
+    Description: Environment
+    AllowedValues: [dev, prd]
+  Project:
+    Type: String
+    Default: example
+
+Resources:
+  CWLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "/ecs/${Prefix}-${Env}-${Project}"
+      RetentionInDays: !FindInMap [AWSParameterMap, RetentionInDays, !Ref Env]
+      Tags:
+        - Key: cfn-stackname
+          Value: !Sub ${AWS::StackName}
+
+  ECR:
+    Type: "AWS::ECR::Repository"
+    Properties:
+      RepositoryName: !Sub ${Prefix}/${Env}/${Project}
+      LifecyclePolicy:
+        LifecyclePolicyText: !FindInMap [AWSParameterMap, ECR, LifecyclePolicyText]
+      Tags:
+        - Key: cfn-stackname
+          Value: !Sub ${AWS::StackName}
+
+  TaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    UpdateReplacePolicy: "Retain"
+    Properties:
+      Tags:
+        - Key: cfn-stackname
+          Value: !Sub ${AWS::StackName}
+      Family: !Sub "${Prefix}-${Env}-${Project}-task"
+      ExecutionRoleArn:
+        Fn::ImportValue: !FindInMap [ImportValue, ExecutionRole, Arn]
+      RequiresCompatibilities:
+        - EC2
+      ContainerDefinitions:
+        - Name: !Sub "${Prefix}-${Env}-${Project}-container"
+          Cpu: !FindInMap [AWSParameterMap, TaskDefinition, Cpu]
+          Memory: !FindInMap [AWSParameterMap, TaskDefinition, Memory]
+          Image: nginx:latest # !GetAtt ECR.RepositoryUri
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 0
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CWLogGroup
+              awslogs-region: "ap-northeast-1"
+              awslogs-stream-prefix: "ecs"
+          Environment:
+            - Name: ENV
+              Value: !Ref Env
+
+Outputs:
+  ExportTaskDefinitionLatestArn:
+    Description: "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/TaskDefinitionFamily"
+    Value: !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${Prefix}-${Env}-${Project}-task"
+    Export:
+      Name: !Sub "${Prefix}-${Env}-${Project}-task-def-latest-arn"

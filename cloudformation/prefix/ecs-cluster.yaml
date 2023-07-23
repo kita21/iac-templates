@@ -1,0 +1,311 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "stackname: {Prefix}-{Env}-ecs-cluster. ECS-Cluster, AutoScaling, LaunchTemplate"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Environment Name Configuration"
+        Parameters:
+          - Prefix
+          - Env
+          - Project
+      - Label:
+          default: "AWS Resource Configuration"
+        Parameters:
+          - SubnetId
+          - SecurityGroup
+      - Label:
+          default: "AutoScalingGroup Parameter Configuration"
+        Parameters:
+          - AsgMaxSize
+          - AsgMinSize
+          - AsgDesiredSize
+          - AsgOnDemandBase
+          - AsgOnDemandPercentage
+          - ECSOptimizedAMI
+
+Mappings:
+  ImportValue:
+    LambdaExecutionRole:
+      Arn: "lambda-execution-role-arn"
+    SNSLambdaRole:
+      Arn: "sns-lambda-role-arn"
+    EC2InstanceProfile:
+      Arn: "ecs-instance-profile-arn"
+  AWSParameterMap:
+    EbsVolume:
+      Size: 32
+    InstanceTypes:
+      dev: [t2.micro, t3.medium]
+      prd: [t2.micro, t3.medium]
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: v1
+  Env:
+    Type: String
+    Description: Environment
+    AllowedValues: [dev, prd]
+  Project:
+    Type: String
+    Default: example
+  ECSOptimizedAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/amzn2-ami-ecs-hvm-2.0.20230627-x86_64-ebs/image_id # recommendedにするとテンプレート変更してなくても差分が出るためversion固定
+    AllowedValues: # https://docs.aws.amazon.com/ja_jp/AmazonECS/latest/developerguide/retrieve-ecs-optimized_windows_AMI.html
+      - /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id,
+      - /aws/service/ecs/optimized-ami/amazon-linux-2/amzn2-ami-ecs-hvm-2.0.20230627-x86_64-ebs/image_id # ecs_agent_version: 1.73.0 固定version
+  SubnetId:
+    Type: "List<AWS::EC2::Subnet::Id>"
+    Description: "Select at two subnets in your selected VPC."
+  SecurityGroup:
+    Type: "List<AWS::EC2::SecurityGroup::Id>"
+    Description: "Existing security group to associate the container instances."
+  AsgMaxSize:
+    Type: Number
+    Description: "Specifies the number of instances to launch and register to the cluster."
+    Default: 2
+  AsgMinSize:
+    Type: Number
+    Description: "Specifies the number of instances to launch and register to the cluster."
+    Default: 1
+  AsgDesiredSize:
+    Type: Number
+    Description: "Specifies the number of instances to launch and register to the cluster."
+    Default: 1
+  AsgOnDemandBase:
+    Type: Number
+    Description: "Minimum number of activations on-demand Instance."
+    Default: 0
+  AsgOnDemandPercentage:
+    Type: Number
+    Description: Percentage of on-demand instances.(0~100%).
+    Default: 0
+    MaxValue: 100
+    MinValue: 0
+
+Resources:
+  ECSCluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: !Sub "${Prefix}-${Env}-${Project}-cluster"
+
+  ECSASG:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: 1
+        PauseTime: PT2M
+    Properties:
+      AutoScalingGroupName: !Sub "${Prefix}-${Env}-${Project}-asg"
+      MixedInstancesPolicy:
+        InstancesDistribution:
+          SpotAllocationStrategy: price-capacity-optimized
+          OnDemandBaseCapacity: !Ref AsgOnDemandBase
+          OnDemandPercentageAboveBaseCapacity: !Ref AsgOnDemandPercentage
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref ECSInstanceLt
+            Version: !GetAtt ECSInstanceLt.LatestVersionNumber
+          Overrides:
+            - InstanceType: !Select [0, !FindInMap [AWSParameterMap, InstanceTypes, !Ref Env]]
+            - InstanceType: !Select [1, !FindInMap [AWSParameterMap, InstanceTypes, !Ref Env]]
+      CapacityRebalance: true
+      MetricsCollection:
+        - Granularity: 1Minute
+      VPCZoneIdentifier: !Ref SubnetId
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgDesiredSize
+      Tags:
+        - Key: Name
+          Value: !Sub "${Prefix}-${Env}-${Project}-ecs-instance"
+          PropagateAtLaunch: true
+
+  ECSInstanceLt:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
+      LaunchTemplateName: !Sub "${Prefix}-${Env}-${Project}-lt"
+      LaunchTemplateData:
+        SecurityGroupIds: !Ref SecurityGroup
+        InstanceInitiatedShutdownBehavior: terminate
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !FindInMap [AWSParameterMap, EbsVolume, Size]
+              DeleteOnTermination: true
+              VolumeType: gp3
+        IamInstanceProfile:
+          Arn:
+            Fn::ImportValue: !FindInMap [ImportValue, EC2InstanceProfile, Arn]
+        DisableApiTermination: false
+        ImageId: !Ref ECSOptimizedAMI
+        UserData: # https://docs.aws.amazon.com/ja_jp/AmazonECS/latest/developerguide/container-instance-spot.html
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              echo ECS_CLUSTER=${ECSClusterName} >> /etc/ecs/ecs.config
+              echo ECS_ENABLE_SPOT_INSTANCE_DRAINING=true >> /etc/ecs/ecs.config
+            - ECSClusterName: !Ref ECSCluster
+        TagSpecifications:
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub ${Prefix}-${Env}-${Project}-instance-volume
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+          - Key: cfn-stackname
+            Value: !Sub ${AWS::StackName}
+
+# https://aws.amazon.com/jp/blogs/news/how-to-automate-container-instance-draining-in-amazon-ecs/
+# https://github.com/aws-samples/ecs-cid-sample/blob/master/cform/ecs.yaml
+  LambdaFunctionForASG:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub "${Prefix}-${Env}-${Project}-asg-draining-lambda"
+      Description: Gracefully drain ECS tasks from EC2 instances before the instances are terminated by autoscaling.
+      Handler: index.lambda_handler
+      Role:
+        Fn::ImportValue: !FindInMap [ImportValue, LambdaExecutionRole, Arn]
+      Runtime: python3.10
+      MemorySize: 128
+      Timeout: 60
+      Code:
+        ZipFile: !Sub 
+          - |
+            import json
+            import time
+            import boto3
+
+            CLUSTER = '${ECSClusterName}'
+            REGION = '${AWS::Region}'
+
+            ECS = boto3.client('ecs', region_name=REGION)
+            ASG = boto3.client('autoscaling', region_name=REGION)
+            SNS = boto3.client('sns', region_name=REGION)
+
+            def find_ecs_instance_info(instance_id):
+                paginator = ECS.get_paginator('list_container_instances')
+                for list_resp in paginator.paginate(cluster=CLUSTER):
+                    arns = list_resp['containerInstanceArns']
+                    desc_resp = ECS.describe_container_instances(cluster=CLUSTER,
+                                                                containerInstances=arns)
+                    for container_instance in desc_resp['containerInstances']:
+                        if container_instance['ec2InstanceId'] != instance_id:
+                            continue
+
+                        print('Found instance: id=%s, arn=%s, status=%s, runningTasksCount=%s' %
+                              (instance_id, container_instance['containerInstanceArn'],
+                              container_instance['status'], container_instance['runningTasksCount']))
+
+                        return (container_instance['containerInstanceArn'],
+                                container_instance['status'], container_instance['runningTasksCount'])
+
+                return None, None, 0
+
+            def instance_has_running_tasks(instance_id):
+                (instance_arn, container_status, running_tasks) = find_ecs_instance_info(instance_id)
+                if instance_arn is None:
+                    print('Could not find instance ID %s. Letting autoscaling kill the instance.' %
+                          (instance_id))
+                    return False
+
+                if container_status != 'DRAINING':
+                    print('Setting container instance %s (%s) to DRAINING' %
+                          (instance_id, instance_arn))
+                    ECS.update_container_instances_state(cluster=CLUSTER,
+                                                        containerInstances=[instance_arn],
+                                                        status='DRAINING')
+
+                return running_tasks > 0
+
+            def lambda_handler(event, context):
+                msg = json.loads(event['Records'][0]['Sns']['Message'])
+
+                if 'LifecycleTransition' not in msg.keys() or \
+                  msg['LifecycleTransition'].find('autoscaling:EC2_INSTANCE_TERMINATING') == -1:
+                    print('Exiting since the lifecycle transition is not EC2_INSTANCE_TERMINATING.')
+                    return
+
+                if instance_has_running_tasks(msg['EC2InstanceId']):
+                    print('Tasks are still running on instance %s; posting msg to SNS topic %s' %
+                          (msg['EC2InstanceId'], event['Records'][0]['Sns']['TopicArn']))
+                    time.sleep(5)
+                    sns_resp = SNS.publish(TopicArn=event['Records'][0]['Sns']['TopicArn'],
+                                          Message=json.dumps(msg),
+                                          Subject='Publishing SNS msg to invoke Lambda again.')
+                    print('Posted msg %s to SNS topic.' % (sns_resp['MessageId']))
+                else:
+                    print('No tasks are running on instance %s; setting lifecycle to complete' %
+                          (msg['EC2InstanceId']))
+
+                    ASG.complete_lifecycle_action(LifecycleHookName=msg['LifecycleHookName'],
+                                                  AutoScalingGroupName=msg['AutoScalingGroupName'],
+                                                  LifecycleActionResult='CONTINUE',
+                                                  InstanceId=msg['EC2InstanceId'])
+          - ECSClusterName: !Ref ECSCluster
+      Tags:
+        - Key: cfn-stackname
+          Value: !Sub ${AWS::StackName}
+
+  ASGSNSTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: !Sub "${Prefix}-${Env}-${Project}-asg-draining-topic"
+      TopicName: !Sub "${Prefix}-${Env}-${Project}-asg-draining-topic"
+      Subscription:
+        - Endpoint: !GetAtt LambdaFunctionForASG.Arn
+          Protocol: "lambda"
+      Tags:
+        - Key: cfn-stackname
+          Value: !Sub ${AWS::StackName}
+    DependsOn: "LambdaFunctionForASG"
+
+  LambdaSubscriptionToSNSTopic:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !GetAtt LambdaFunctionForASG.Arn
+      Protocol: 'lambda'
+      TopicArn: !Ref ASGSNSTopic
+
+  LambdaInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref LambdaFunctionForASG
+      Action: lambda:InvokeFunction
+      Principal: "sns.amazonaws.com"
+      SourceArn: !Ref ASGSNSTopic
+
+  ASGTerminateHook:
+    Type: "AWS::AutoScaling::LifecycleHook"
+    Properties:
+      LifecycleHookName: !Sub "${Prefix}-${Env}-${Project}-asg-terminate-hook"
+      AutoScalingGroupName: !Ref ECSASG
+      DefaultResult: "ABANDON"
+      HeartbeatTimeout: "900"
+      LifecycleTransition: "autoscaling:EC2_INSTANCE_TERMINATING"
+      NotificationTargetARN: !Ref ASGSNSTopic
+      RoleARN:
+        Fn::ImportValue: !FindInMap [ImportValue, SNSLambdaRole, Arn]
+    DependsOn: "ASGSNSTopic"
+
+Outputs:
+  ExportECSClusterName:
+    Description: "Output Export AWS::ECS::Cluster.Ref"
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub "${Prefix}-${Env}-${Project}-ecs-cluster-name"
+  ExportECSClusterArn:
+    Description: "Output Export AWS::ECS::Cluster.Arn"
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub "${Prefix}-${Env}-${Project}-ecs-cluster-arn"
+  ExportAutoScalingGroupName:
+    Description: "Output Export AWS::AutoScaling::AutoScalingGroup.Ref"
+    Value: !Ref ECSASG
+    Export:
+      Name: !Sub "${Prefix}-${Env}-${Project}-asg-name"

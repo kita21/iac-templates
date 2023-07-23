@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "stackName: {ENV}-private-link. AWS::EC2::VPCEndpoint"
+
+Parameters:
+  Env:
+    Type: String
+    Description: Project environment
+    AllowedValues: [dev, prd]
+  Project:
+    Type: String
+    Description: Project Name
+    Default: example
+
+Resources:
+# https://dev.classmethod.jp/articles/vpc-endpoints-for-ecs-2022/
+# ECR
+  PrivateLinkInterfaceEndpointToECRApi:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+  PrivateLinkInterfaceEndpointToECRDkr:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+  PrivateLinkGatewayEndpointToS3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - Fn::ImportValue: !Sub ${Env}-private-rt-id
+
+# CloudWatch Logs
+  PrivateLinkInterfaceEndpointToCWLogs:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+
+# ECS
+  PrivateLinkInterfaceEndpointToECS:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecs
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+  PrivateLinkInterfaceEndpointToECSAgent:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecs-agent
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+  PrivateLinkInterfaceEndpointToECSTelemetry:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecs-telemetry
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+
+# SSM
+  PrivateLinkInterfaceEndpointToSSM:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+  PrivateLinkInterfaceEndpointToSSMMessages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+  PrivateLinkInterfaceEndpointToEC2Messages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      VpcId:
+        Fn::ImportValue: !Sub ${Env}-vpc-id
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Env}-private-1a-subnet-id
+        - Fn::ImportValue: !Sub ${Env}-private-1c-subnet-id
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Env}-private-link-sg-id
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true

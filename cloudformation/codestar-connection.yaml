@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CodeStarGitHubConnection. stackname: codestar-connection"
+
+Resources:
+  CodeStarGitHubConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: github-connection
+      ProviderType: GitHub
+      Tags:
+        - Key: cfn-stackname
+          Value: !Sub ${AWS::StackName}
+
+Outputs:
+  ExportCodeStarGitHubConnectionArn:
+    Description: "Output Export AWS::CodeStarConnections::Connection.ConnectionArn"
+    Value: !GetAtt CodeStarGitHubConnection.ConnectionArn
+    Export:
+      Name: codestar-github-connection-arn
