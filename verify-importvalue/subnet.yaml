@@ -1,0 +1,24 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Verify ImportValue Subnet. Dev And STG"
+Transform: 'AWS::LanguageExtensions'
+
+Mappings:
+  VPC:
+    Id:
+      Dev: vpc-06b64437b69a6f27c
+      Stg: vpc-06aa460b59a645ac5
+
+Resources:
+  'Fn::ForEach::Envs':
+    - Env
+    - [Dev]
+    - '${Env}PublicSubnet':
+        Type: AWS::EC2::Subnet
+        Properties:
+          AvailabilityZone: ap-northeast-1a
+          CidrBlock: 10.0.1.0/24
+          VpcId: # !FindInMap [VPC, Id, !Ref Env]
+            Fn::ImportValue: !Sub "${Env}VPCId"
+          Tags:
+            - Key: Name
+              Value: !Sub ${Env}PublicSubnet1A

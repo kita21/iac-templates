@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Verify ImportValue VPC. Dev And STG"
+Transform: 'AWS::LanguageExtensions'
+
+Resources:
+  'Fn::ForEach::Envs':
+    - Env
+    - [Dev, Stg]
+    - '${Env}VPC':
+        Type: AWS::EC2::VPC
+        Properties:
+          CidrBlock: 10.0.0.0/16
+
+Outputs:
+  'Fn::ForEach::OutputEnvs':
+    - Env
+    - [Dev, Stg]
+    - '${Env}VPCId':
+        Description: Output Export AWS::EC2::VPC.Ref VPCId
+        Value:
+          Ref: !Sub "${Env}VPC"
+        Export:
+          Name: !Sub "${Env}VPCId"
